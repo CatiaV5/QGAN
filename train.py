@@ -26,8 +26,8 @@ torch.manual_seed(seed=seed)
 np.random.seed(seed=seed)
 random.seed(seed)
 
-train_path = "/Users/stuckejana/Downloads/summer2winter_yosemite/trainA"
-test_path = "/Users/stuckejana/Downloads/summer2winter_yosemite/testA"
+train_path = "../Downloads/summer2winter_yosemite/trainA"
+test_path = "../Downloads/summer2winter_yosemite/testA"
 
 image_size = 128  # Height / width of the square images
 batch_size = 1
