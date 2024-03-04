@@ -26,8 +26,8 @@ torch.manual_seed(seed=seed)
 np.random.seed(seed=seed)
 random.seed(seed)
 
-train_path = "../Downloads/summer2winter_yosemite/trainA"
-test_path = "../Downloads/summer2winter_yosemite/testA"
+train_path = "/home/jstucke/workspace/QGAN/data/trainA"
+test_path = "/home/jstucke/workspace/QGAN/data/testA"
 
 image_size = 128  # Height / width of the square images
 batch_size = 1
@@ -35,9 +35,11 @@ batch_size = 1
 transform = transforms.Compose([transforms.ToTensor()])
 
 transforms_ = [
+    transforms.Grayscale(num_output_channels=1),  # Convert images to grayscale
     transforms.Resize((image_size, image_size), Image.BICUBIC),
     transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    transforms.Normalize((0.5,), (0.5,))  # Adjust normalization for a single channel
+    #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ]
 
 # Create dataset instances
@@ -53,7 +55,7 @@ class Discriminator(nn.Module):
     def __init__(self, image_size):
         super(Discriminator, self).__init__()
         self.image_size = image_size
-        input_features = image_size[0] * image_size[1]  # Assuming grayscale for simplicity; adjust if RGB
+        input_features = image_size[0] * image_size[1] * 1 # Assuming grayscale for simplicity; adjust if RGB
 
         self.model = nn.Sequential(
             nn.Linear(input_features, 1024),
@@ -111,10 +113,10 @@ class Discriminator(nn.Module):
 """
 # Quantum variables
 # For a 128 x 128 Image I will need 2^7 = 128 so 7 qubits
-n_qubits = 5  # 5  # Total number of qubits / N
+n_qubits = 8  # 5  # Total number of qubits / N
 n_a_qubits = 1  # Number of ancillary qubits / N_A
 q_depth = 6  # Depth of the parameterised quantum circuit / D
-n_generators = 4  # Number of subgenerators for the patch method / N_G
+n_generators = 128 #4  # Number of subgenerators for the patch method / N_G
 
 # Quantum simulator
 dev = qml.device("lightning.qubit", wires=n_qubits)
@@ -203,8 +205,8 @@ lrD = 0.01  # Learning rate for discriminator
 num_iter = 2000  # Number of training iterations
 
 # Assuming `train_dataset` is an instance of `ImageDataset` and has an attribute `image_size`
-discriminator = Discriminator(image_size=train_dataset.image_size)
-# discriminator = Discriminator().to(device)
+#discriminator = Discriminator(image_size=train_dataset.image_size)
+discriminator = Discriminator(image_size=[128, 128]).to(device)
 generator = PatchQuantumGenerator(n_generators).to(device)
 
 # Binary cross entropy
@@ -228,6 +230,7 @@ results = []
 
 while True:
     for i, data in enumerate(train_dataloader):
+        print(" Running ..")
 
         # Data for training the discriminator
         # data = data.reshape(-1, image_size * image_size)
@@ -240,6 +243,8 @@ while True:
 
         # Training the discriminator
         discriminator.zero_grad()
+        #outD_real = discriminator(real_data)
+        #outD_fake = discriminator(fake_data.detach())
         outD_real = discriminator(real_data).view(-1)
         outD_fake = discriminator(fake_data.detach()).view(-1)
 
