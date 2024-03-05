@@ -87,139 +87,82 @@ class Discriminator(nn.Module):
         return self.model(x)
 
 
-"""
-class Discriminator(nn.Module):
-    Fully connected classical discriminator
+class PatchClassicalGenerator(nn.Module):
+    """Classical generator class for the patch method"""
 
-    def __init__(self):
-        super().__init__()
-
-        self.model = nn.Sequential(
-            # Inputs to first hidden layer (num_input_features -> 64 (8x8)) 128 x 128 = 16384
-            #nn.Linear(image_size * image_size, 64),
-            nn.Linear(image_size * image_size * 3, 16384),
-            nn.ReLU(),
-            # First hidden layer (64 -> 16)
-            nn.Linear(16384, 4096),
-            nn.ReLU(),
-            # Third hidden layer (64 -> 16)
-            nn.Linear(4096, 1024),
-            nn.ReLU(),
-            # Fifth hidden layer (64 -> 16)
-            nn.Linear(1024, 256),
-            nn.ReLU(),
-            # Seventh hidden layer (64 -> 16)
-            nn.Linear(256, 64),
-            nn.ReLU(),
-            # Nineth hidden layer (64 -> 16)
-            nn.Linear(64, 16),
-            nn.ReLU(),
-            # Tenth hidden layer (16 -> output)
-            nn.Linear(16, 1),
-            nn.Sigmoid(),
-        )
-
-    def forward(self, x):
-        return self.model(x)
-
-"""
-# Quantum variables
-# For a 128 x 128 Image I will need 2^7 = 128 so 7 qubits
-n_qubits = 8  # 5  # Total number of qubits / N
-n_a_qubits = 1  # Number of ancillary qubits / N_A
-q_depth = 6  # Depth of the parameterised quantum circuit / D
-n_generators = 128 #4  # Number of subgenerators for the patch method / N_G
-
-# Quantum simulator
-dev = qml.device("lightning.qubit", wires=n_qubits)
-# Enable CUDA device if available
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-
-@qml.qnode(dev, diff_method="parameter-shift")
-def quantum_circuit(noise, weights):
-    weights = weights.reshape(q_depth, n_qubits)
-
-    # Initialise latent vectors
-    for i in range(n_qubits):
-        qml.RY(noise[i], wires=i)
-
-    # Repeated layer
-    for i in range(q_depth):
-        # Parameterised layer
-        for y in range(n_qubits):
-            qml.RY(weights[i][y], wires=y)
-
-        # Control Z gates
-        for y in range(n_qubits - 1):
-            qml.CZ(wires=[y, y + 1])
-
-    return qml.probs(wires=list(range(n_qubits)))
-
-
-# For further info on how the non-linear transform is implemented in Pennylane
-# https://discuss.pennylane.ai/t/ancillary-subsystem-measurement-then-trace-out/1532
-def partial_measure(noise, weights):
-    # Non-linear Transform
-    probs = quantum_circuit(noise, weights)
-    probsgiven0 = probs[: (2 ** (n_qubits - n_a_qubits))]
-    probsgiven0 /= torch.sum(probs)
-
-    # Post-Processing
-    probsgiven = probsgiven0 / torch.max(probsgiven0)
-    return probsgiven
-
-
-class PatchQuantumGenerator(nn.Module):
-    """Quantum generator class for the patch method"""
-
-    def __init__(self, n_generators, q_delta=1):
+    def __init__(self, n_generators, patch_size=8, noise_dim=100):
         """
         Args:
-            n_generators (int): Number of sub-generators to be used in the patch method.
-            q_delta (float, optional): Spread of the random distribution for parameter initialisation.
+            n_generators (int): Number of sub-generators (patches) to be used in the patch method.
+            patch_size (int): Size of the output from each sub-generator, assuming square patches.
+            noise_dim (int): The dimensionality of the input noise vector.
         """
 
-        super().__init__()
+        super(PatchClassicalGenerator, self).__init__()
 
-        self.q_params = nn.ParameterList(
+        self.n_generators = n_generators
+        self.patch_size = patch_size
+        self.noise_dim = noise_dim
+
+        # Define a list of sub-generators, each is a simple neural network
+        self.sub_generators = nn.ModuleList(
             [
-                nn.Parameter(q_delta * torch.rand(q_depth * n_qubits), requires_grad=True)
+                nn.Sequential(
+                    nn.Linear(noise_dim, 128),
+                    nn.ReLU(),
+                    nn.Linear(128, patch_size * patch_size),
+                    nn.Tanh()  # Use Tanh to keep output values in a reasonable range
+                )
                 for _ in range(n_generators)
             ]
         )
-        self.n_generators = n_generators
 
     def forward(self, x):
-        # Size of each sub-generator output
-        patch_size = 2 ** (n_qubits - n_a_qubits)
+        batch_size = x.size(0)
 
-        # Create a Tensor to 'catch' a batch of images from the for loop. x.size(0) is the batch size.
+        # Create an empty tensor to accumulate the generated image patches
+        #images = torch.Tensor(batch_size, 0, self.patch_size, self.patch_size).to(x.device)
         images = torch.Tensor(x.size(0), 0).to(device)
-
         # Iterate over all sub-generators
-        for params in self.q_params:
+        for gen in self.sub_generators:
+            # Generate a patch for each element in the batch
+            gen_noise = torch.randn(batch_size, self.noise_dim).to(x.device)
+            patch = gen(gen_noise)
+            patch = patch.view(batch_size, 1, self.patch_size, self.patch_size)  # Reshape to the correct patch size
+            #patch = torch.cat((patches, patch))
+            # Concatenate the generated patches to form the full image
+            #images = torch.cat((images, patch), 2)  # Adjust the dimension as necessary
+            images = torch.cat((images, patch), 1)
 
-            # Create a Tensor to 'catch' a batch of the patches from a single sub-generator
-            patches = torch.Tensor(0, patch_size).to(device)
-            for elem in x:
-                q_out = partial_measure(elem, params).float().unsqueeze(0)
-                patches = torch.cat((patches, q_out))
-
-            # Each batch of patches is concatenated with each other to create a batch of images
-            images = torch.cat((images, patches), 1)
+        # Assuming square images for simplicity; adjust if necessary for other shapes
+        n_patches_side = int(math.sqrt(self.n_generators))
+        images = images.view(batch_size, 1, n_patches_side * self.patch_size, n_patches_side * self.patch_size)
 
         return images
+
 
 
 lrG = 0.3  # Learning rate for the generator
 lrD = 0.01  # Learning rate for discriminator
 num_iter = 2000  # Number of training iterations
 
+n_qubits = 8  # 5  # Total number of qubits / N
+n_a_qubits = 1  # Number of ancillary qubits / N_A
+q_depth = 6  # Depth of the parameterised quantum circuit / D
+n_generators = 128 #4  # Number of subgenerators for the patch method / N_G
+patch_size = 32  # Size of each patch assuming square patches
+
+# Enable CUDA device if available
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 # Assuming `train_dataset` is an instance of `ImageDataset` and has an attribute `image_size`
 #discriminator = Discriminator(image_size=train_dataset.image_size)
 discriminator = Discriminator(image_size=[128, 128]).to(device)
-generator = PatchQuantumGenerator(n_generators).to(device)
+# Instantiate the classical generator.
+generator = PatchClassicalGenerator(n_generators=n_generators,
+                                    patch_size= 2 ** (n_qubits - n_a_qubits)
+                                ).to(device)
+
 
 # Binary cross entropy
 criterion = nn.BCELoss()
@@ -232,7 +175,7 @@ real_labels = torch.full((batch_size,), 1.0, dtype=torch.float, device=device)
 fake_labels = torch.full((batch_size,), 0.0, dtype=torch.float, device=device)
 
 # Fixed noise allows us to visually track the generated images throughout training
-fixed_noise = torch.rand(8, n_qubits, device=device) * math.pi / 2
+fixed_noise = torch.rand(8, n_qubits , device=device) * math.pi / 2
 
 # Iteration counter
 counter = 0
@@ -250,7 +193,7 @@ while True:
         real_data = data.to(device)
 
         # Noise follwing a uniform distribution in range [0,pi/2)
-        noise = torch.rand(batch_size, n_qubits, device=device) * math.pi / 2
+        noise = torch.rand(batch_size, n_qubits , device=device) * math.pi / 2
         fake_data = generator(noise)
 
         # Training the discriminator
