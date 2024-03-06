@@ -27,17 +27,14 @@ np.random.seed(seed=seed)
 random.seed(seed)
 #
 # Automatically get the current user's home directory
-home_dir = os.path.expanduser('~')
-
-# Set the project and data paths relative to the home directory
-project_path = os.path.join(home_dir, "workspace/QGAN")
+base_dir = os.getcwd()
 
 
-train_path = os.path.join(project_path, "data/trainA")
-test_path = os.path.join(project_path, "data/testA")
+train_path = os.path.join(base_dir, "data/trainA")
+test_path = os.path.join(base_dir, "data/testA")
 
 # Create a directory to save generated images
-images_dir = os.path.join(project_path, "generated_images")
+images_dir = os.path.join(base_dir, "generated_images")
 os.makedirs(images_dir, exist_ok=True)
 
 
