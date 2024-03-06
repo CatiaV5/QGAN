@@ -83,6 +83,25 @@ class Discriminator(nn.Module):
         x = x.view(x.size(0), -1)  # Flatten the image
         return self.model(x)
 
+class Generator(nn.Module):
+    def __init__(self, noise_dim=100):
+        super(Generator, self).__init__()
+        self.noise_dim = noise_dim
+
+        self.model = nn.Sequential(
+            nn.Linear(noise_dim, 128 * 4),  # Upscale noise input
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(128 * 4, 64 * 32 * 32),  # Further upscale to prepare for image size
+            nn.BatchNorm1d(64 * 32 * 32),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(64 * 32 * 32, 1 * 128 * 128),  # Target image size
+            nn.Tanh()  # Normalize the output to [-1, 1]
+        )
+
+    def forward(self, z):
+        img = self.model(z)
+        img = img.view(img.size(0), 1, 128, 128)  # Reshape to image dimensions
+        return img
 
 class PatchClassicalGenerator(nn.Module):
     """Classical generator class for the patch method"""
@@ -156,9 +175,10 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 #discriminator = Discriminator(image_size=train_dataset.image_size)
 discriminator = Discriminator(image_size=[128, 128]).to(device)
 # Instantiate the classical generator.
-generator = PatchClassicalGenerator(n_generators=n_generators,
+"""generator = PatchClassicalGenerator(n_generators=n_generators,
                                     patch_size= 2 ** (n_qubits - n_a_qubits)
-                                ).to(device)
+                                ).to(device)"""
+generator = Generator().to(device)
 
 
 # Binary cross entropy
@@ -172,7 +192,9 @@ real_labels = torch.full((batch_size,), 1.0, dtype=torch.float, device=device)
 fake_labels = torch.full((batch_size,), 0.0, dtype=torch.float, device=device)
 
 # Fixed noise allows us to visually track the generated images throughout training
-fixed_noise = torch.rand(8, n_qubits , device=device) * math.pi / 2
+#fixed_noise = torch.rand(8, n_qubits , device=device) * math.pi / 2
+fixed_noise = torch.randn(8, 100, device=device)  # Adjust to the correct size for visualization
+
 
 # Iteration counter
 counter = 0
@@ -190,7 +212,9 @@ while True:
         real_data = data.to(device)
 
         # Noise follwing a uniform distribution in range [0,pi/2)
-        noise = torch.rand(batch_size, n_qubits , device=device) * math.pi / 2
+        #noise = torch.rand(batch_size, n_qubits , device=device) * math.pi / 2
+        noise_dim = 100  # This should match the generator's expected noise dimension
+        noise = torch.randn(batch_size, noise_dim, device=device)
         fake_data = generator(noise)
 
         # Training the discriminator
@@ -225,6 +249,7 @@ while True:
 
         # Save images every 50 iterations
         if counter % 50 == 0:
+            #test_images = generator(fixed_noise).view(8, 1, image_size, image_size).cpu().detach()
             test_images = generator(fixed_noise).view(8, 1, image_size, image_size).cpu().detach()
             results.append(test_images)
 
